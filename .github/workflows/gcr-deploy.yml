@@ -1,37 +1,88 @@
-name: CI/CD
-
+name: Google Cloud Run Deploy
+# https://github.com/google-github-actions/setup-gcloud
 on:
   push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
+    branches:
+      - master
+
+env:
+  PROJECT_ID: ${{ secrets.GCR_PROJECT }}
+  RUN_REGION: us-central1
+  SERVICE_NAME: zinc-iterator-353413
 
 jobs:
   build:
-
+    name: Build React App
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        node-version: [12.x]
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@main
+
+      - name: Setup Node.js (NPM)
+        uses: actions/setup-node@master
+        with:
+          node-version: '12.x'
+
+      - name: Use cached node_modules
+        uses: actions/cache@master
+        with:
+          path: node_modules
+          key: nodeModules-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            nodeModules-
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+        env:
+          CI: true
+
+      - name: Build Development
+        run: yarn build
+
+      - name: Archive Production Artifact
+        uses: actions/upload-artifact@main
+        with:
+          name: build
+          path: build
+
+  deploy-gcr:
+    name: Deploy to GCR
+    needs: build
+    runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v2
+      - name: Checkout Repo
+        uses: actions/checkout@main
 
-    - name: Set up Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v1
-      with:
-        node-version: ${{ matrix.node-version }}
+      - name: Download Artifact
+        uses: actions/download-artifact@main
+        with:
+          name: build
+          path: .docker/build
 
-    - name: Install dependencies
-      run: npm install
+      - name: Setup GCloud Auth
+        id: auth
+        uses: google-github-actions/auth@v0.4.0
+        with:
+          credentials_json: ${{ inputs.GCR_SA_KEY }}
 
-    - name: Run the tests and generate coverage report
-      run: npm test -- --coverage
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v0.2.1
 
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v1
+      # Build and push image to Google Container Registry
+      - name: Build & Push
+        run: |-
+          gcloud builds submit \
+            --quiet \
+            --tag "gcr.io/$PROJECT_ID/$SERVICE_NAME:$GITHUB_SHA"
+        working-directory: .docker
 
-    - name: Build
-      run: npm run build
+      # Deploy image to Cloud Run
+      - name: Deploy GCR
+        run: |-
+          gcloud run deploy "$SERVICE_NAME" \
+            --quiet \
+            --region "$RUN_REGION" \
+            --image "gcr.io/$PROJECT_ID/$SERVICE_NAME:$GITHUB_SHA" \
+            --platform "managed" \
+            --allow-unauthenticated
