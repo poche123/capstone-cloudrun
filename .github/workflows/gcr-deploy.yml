@@ -8,7 +8,7 @@ on:
 env:
   PROJECT_ID: ${{ secrets.GCR_PROJECT }}
   RUN_REGION: us-central1
-  SERVICE_NAME: zinc-iterator-353413
+  SERVICE_NAME: medium-react-app
 
 jobs:
   build:
@@ -32,12 +32,12 @@ jobs:
           restore-keys: |
             nodeModules-
       - name: Install dependencies
-        run: npm install
+        run: yarn install --frozen-lockfile
         env:
           CI: true
 
       - name: Build Development
-        run: npm run build
+        run: yarn build
 
       - name: Archive Production Artifact
         uses: actions/upload-artifact@main
